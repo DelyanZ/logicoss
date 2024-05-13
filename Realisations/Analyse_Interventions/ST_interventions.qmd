@@ -1,0 +1,229 @@
+---
+title: "time_séris"
+output: pdf_document
+date: "2024-04-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Prétraitement des données
+
+```{r}
+source("/home/logicoss/rds_dev.R")
+
+dbListTables(conn1)
+
+pec <- dbGetQuery(conn1, "SELECT pec_id, evenement_id, psf_id, motif_cloture_id, psf_libelle, race_day, date_modifiee FROM pec")
+pec_complet <- dbGetQuery(conn1, "SELECT * FROM pec")
+
+event <- dbGetQuery(conn1, "SELECT evenement_id, evenement_libelle_generic, evenement_libelle, structure_id, structure_libelle FROM event")
+event_complet <- dbGetQuery(conn1, "SELECT * FROM event")
+
+
+library(dplyr)
+library(tidyr)
+library(data.table)
+library(tidyverse)
+library(ggplot2)
+pec <- setDT(pec)
+event <- setDT(event)
+
+dim(pec)# 249806      7
+pec <- pec[pec$race_day !="1202-07-08",]
+pec <- pec[pec$race_day !="1860-08-26",]
+pec <- pec[pec$race_day !="2002-06-22",]
+pec <- pec[!is.na(pec$pec_id),]# ou pec <- pec[!is.na(pec$race_day),], 21 lignes 
+dim(pec)# 249782      7
+
+
+pec[nchar(date_modifiee) == 10,.N]#149
+pec[, date_modifiee := ifelse(nchar(date_modifiee) == 10, paste(date_modifiee, "00:00:00"),date_modifiee)]
+pec[nchar(date_modifiee) == 10,.N]#0
+
+merged_pec_event <- merge(pec, event, by = "evenement_id", all.x = TRUE)
+
+
+#merged_pec_event[, race_day := as.Date(race_day)]
+
+
+merged_pec_event[, date_modifiee := as.POSIXct(date_modifiee, format = "%Y-%m-%d %H:%M:%S")]
+merged_pec_event[, time_only := format(date_modifiee,"%H:%M:%S")]
+merged_pec_event[, date_only := as.Date(date_modifiee,format = "%Y-%m-%d")]
+
+library(lubridate)
+merged_pec_event[, interval_start := floor_date(date_modifiee, unit="15 minutes")]
+merged_pec_event[, interval_label := paste(format(interval_start, "%H:%M:%S"), format(interval_start + minutes(15) - seconds(1), "%H:%M:%S"), sep="-")]
+merged_pec_event[, time_label := format(interval_start + minutes(15), "%H:%M")]
+
+
+#pec_marathon_paris_intervention
+
+tab_intervention <- merged_pec_event[psf_id == evenement_id]
+intervention <- tab_intervention[, .(count_intervention=.N), by = .(evenement_id,evenement_libelle_generic,evenement_libelle,structure_id,structure_libelle,interval_label,time_label,date_only)]#setnames(intervention_rescue_counts, "N", "count_intervention") 
+intervention <- intervention[order(date_only,interval_label,time_label,evenement_id)]
+
+intervention[, cumulative_count := cumsum(count_intervention), by=.(date_only,evenement_id)]#interventions cumulee
+
+```
+
+```{r}
+mara_paris <- intervention[evenement_libelle_generic == "Marathon de Paris",]
+mara_paris <- mara_paris[,c("evenement_libelle_generic","date_only","time_label","count_intervention")]
+```
+
+
+
+
+
+```{r}
+mara_paris <- mara_paris[!date_only %in% as.Date(c("2022-03-06","2024-04-16"))]
+
+mara_paris <- mara_paris[, .(count_intervention = sum(count_intervention)), by = .(date_only, time_label)]
+
+```
+
+
+
+```{r}
+time_points <- seq(from = as.POSIXct("00:00", format = "%H:%M"),
+                   to = as.POSIXct("23:45", format = "%H:%M"),
+                   by = "15 mins")
+time_labels <- format(time_points, "%H:%M")
+
+dates <- unique(mara_paris$date_only)
+full_combination <- CJ(date_only = dates, time_label = time_labels)
+
+complete_data <- merge(full_combination, mara_paris, by = c("date_only", "time_label"), all.x = TRUE)
+complete_data[is.na(count_intervention), count_intervention := 0]
+
+head(complete_data)
+
+```
+
+```{r}
+#fusionner 
+
+"Schneider Electric Marathon International de Paris 2019 " et " Avenue Foch - Schneider Electric Marathon de Paris 2019"
+
+```
+
+
+```{r}
+complete_data$datetime <- as.POSIXct(paste(complete_data$date_only, complete_data$time_label), format = "%Y-%m-%d %H:%M")
+library(zoo)
+z<-zoo(complete_data$count_intervention, order.by = complete_data$datetime)
+
+z <- as.data.frame(z)
+
+
+```
+
+```{r}
+write.csv(complete_data, "complete_data.csv", row.names = FALSE,fileEncoding = "UTF-8")
+```
+
+```{r}
+ts_data <- ts(complete_data$count_intervention, frequency = 96)
+plot(decompose(ts_data))
+acf(ts_data)
+pacf(ts_data)
+
+train_data <- window(ts_data, end = c(6,96))
+test_data <- window(ts_data, start = c(7,1))
+
+
+```
+```{r}
+
+fit <- auto.arima(ts_data)
+summary(fit)
+
+pred <- forecast(fit, h = 96)
+plot(pred)
+lines(test_data , col ="red")
+
+accuracy(pred, test_data)
+```
+
+
+
+
+```{r}
+#transformer complete_data a type de time_série
+
+tr_list <- complete_data[,ts(count_intervention,frequency = 96), by = date_only]
+  
+tr_data_2017 <- tr_list [date_only == "2017-04-09",c("V1")]
+
+```
+
+```{r}
+tr_list_sans_date <- tr_list[,c("V1")]
+
+```
+
+
+```{r}
+plot.ts(tr_list_sans_date, type = "l", pch =20, cex= 0.5, ylab = "nb intervention chaque 15 mins", main = "intervention marathon de paris de 2017 à 2024") # trace pas
+
+plot.ts(tr_data_2017, type = "l", pch =20, cex= 0.5, ylab = "nb intervention chaque 15 mins", main = "intervention marathon de paris de 2017")
+
+#plot(decompose(tr_list_sans_date))
+```
+
+```{r}
+#intraday time series model
+tr_data_2017 <- tr_list [date_only == "2024-04-07",c("V1")]#2017-04-09
+ts_2017 <- ts(tr_data_2017, frequency = 96)
+
+#library(forecast)
+fit <- auto.arima(ts_2017)
+fit
+pre <- forecast(fit, h=1)
+print(pre)
+
+```
+
+
+```{r}
+daily_patters <- mara_paris %>%
+  group_by(date_only, time_label) %>%
+  summarise(count = sum(count_intervention), .groups = 'drop')
+
+peak_times <- daily_patters %>%
+  group_by(date_only) %>%
+  summarise(peak_times = time_label[which.max(count)])
+
+print(peak_times)
+```
+
+
+
+
+
+
+## 1.2 Comblement des valeurs manquantes ?
+Les jours sans événement : compléter / ignorer/ interpoler à partir des données adjacentes
+
+
+
+# 2. Analyse descriptive
+
+Analyse de tendance
+
+Analyse périodique
+
+
+# 3. Modélisation
+
+1. décomposition des séries temporelles
+2. modèle:ARIMA(), SARIMA(), lissage exponentiel simple, lissage exponentiel double, lissage de HoltWinters non saisonnier,  lissage de HoltWinters additif,  lissage de HoltWinters multiplicatif
+3. diviser l'ensemble d'entraînement et l'emsemble de test
+
+
+# évaluation la précision des prédictions du modèle
+ 
+ RMSE (erreur quatratique moyenne)
+ la complexité

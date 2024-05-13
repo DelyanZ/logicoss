@@ -1,0 +1,29 @@
+---
+title: "Analyse des Interventions"
+format: pdf
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Préparation des données 
+
+```{r}
+data<-read.csv2("data_interventions_marathon.csv", header = T, sep = ";")[,1:3]
+# data<-ts(data)
+```
+
+Nous avons 7 éditions de marathon. Nous avons pour chaque marathon des données de façon régulière tous les 15 minutes.Chaque édition a 96 mesures. 
+
+```{r}
+plot.ts(1:672, data[,3])
+par(mfrow=c(7,1))
+for(i in 1:7){
+  d = data[i:i*96, ]
+  plot()
+}
+```
+
+Essayer ce que j'ai dis sur le papier dans le bureau. Essayer aussi d'enlever les valeurs extrêmes pour lesquelles il n'y a jamais d'interventions car marathon pas commencé (entre 00h et 10h et entre 18h et 00h). Il n'y a rien a prédire sur ces tranches horaires, de plus elle peuvent impacter les modèles car elle rajoute de la donnée qui n'a pas d'interet pour la prédiction.
