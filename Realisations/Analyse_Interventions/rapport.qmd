@@ -8,22 +8,53 @@ editor: visual
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Préparation des données 
+# Préparation des données
 
 ```{r}
+library(hms)
 data<-read.csv2("data_interventions_marathon.csv", header = T, sep = ";")[,1:3]
+data$time_label <- paste0(data$time_label,":00")
+data$time_label <- hms(data$time_label)  
 # data<-ts(data)
 ```
 
-Nous avons 7 éditions de marathon. Nous avons pour chaque marathon des données de façon régulière tous les 15 minutes.Chaque édition a 96 mesures. 
+Nous avons 7 éditions de marathon. Nous avons pour chaque marathon des données de façon régulière tous les 15 minutes.Chaque édition a 96 mesures.
 
 ```{r}
 plot.ts(1:672, data[,3])
 par(mfrow=c(7,1))
 for(i in 1:7){
-  d = data[i:i*96, ]
-  plot()
+  j = 1
+  d = data[j:i*96, ]
+  plot(j:i*96, d$count_intervention)
+  j = i*96
+}
+
+par(mfrow=c(2,1))
+j = 1
+for(i in 1:2){
+  d = data[j:(i*96),]
+  j = i*96
+  plot(d$time_label, d$count_intervention, type = 'b')
 }
 ```
 
 Essayer ce que j'ai dis sur le papier dans le bureau. Essayer aussi d'enlever les valeurs extrêmes pour lesquelles il n'y a jamais d'interventions car marathon pas commencé (entre 00h et 10h et entre 18h et 00h). Il n'y a rien a prédire sur ces tranches horaires, de plus elle peuvent impacter les modèles car elle rajoute de la donnée qui n'a pas d'interet pour la prédiction.
+
+### Suppression des valeurs entre 18h et 10h du matin
+
+```{r}
+time_labels <- format(seq(from = as.POSIXct("10:00", format = "%H:%M"),
+                   to = as.POSIXct("18:00", format = "%H:%M"),
+                   by = "15 mins"), "%H:%M")
+d = data.frame(date_only = NA, time_label = NA, count_intervention = NA)
+for(i in 0:6){
+  d = rbind(d, data[(41+(i*96)):(73+(i*96)),])
+}
+d = d[-1,]
+d$time_label <- format(d$time_label, "%H:%M")
+```
+
+```{r}
+
+```
